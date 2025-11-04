@@ -1,4 +1,4 @@
-# admin_panel_login.py (VERSÃO FINAL COMPLETA COM CONTEÚDO DAS PÁGINAS)
+# admin_panel_login.py (VERSÃO FINAL COMPLETA COM CONTEÚDO E LOGIN)
 
 import streamlit as st
 import requests
@@ -115,7 +115,7 @@ if page == "Gerenciar Prompts":
             
             selected_prompt = next((p for p in prompts if p['id'] == selected_id), None)
             
-            with st.expander("Editar Prompt Selecionado (ID: {})".format(selected_id)):
+            with st.expander(f"Editar Prompt Selecionado (ID: {selected_id})"):
                 if selected_prompt:
                     edit_name = st.text_input("Nome do Prompt", value=selected_prompt['name'], key=f"edit_name_{selected_id}")
                     edit_text = st.text_area("Texto do Prompt", value=selected_prompt['prompt_text'], height=200, key=f"edit_text_{selected_id}")
@@ -148,14 +148,17 @@ elif page == "Gerenciar Permissões":
         st.subheader(f"Editando permissões para: {selected_name}")
         current_permissions = get_account_permissions(selected_account_id, headers)
         
-        all_prompt_ids = [p['id'] for p in prompts]
+        prompt_options = sorted(prompts, key=lambda p: p['id'])
         selections = []
-        for prompt in sorted(prompts, key=lambda p: p['id']):
-            selections.append(st.checkbox(f"ID {prompt['id']} - {prompt['name']}", value=prompt['id'] in current_permissions, key=f"perm_{prompt['id']}"))
+        for prompt in prompt_options:
+            is_checked = prompt['id'] in current_permissions
+            selections.append(st.checkbox(f"ID {prompt['id']} - {prompt['name']}", value=is_checked, key=f"perm_{prompt['id']}"))
         
         if st.button("Salvar Permissões"):
-            selected_ids = [prompts[i]['id'] for i, selected in enumerate(selections) if selected]
-            if sync_account_permissions(selected_account_id, selected_ids, headers): st.success("Permissões salvas com sucesso!")
+            selected_ids = [prompt_options[i]['id'] for i, selected in enumerate(selections) if selected]
+            if sync_account_permissions(selected_account_id, selected_ids, headers):
+                st.success("Permissões salvas com sucesso!")
+                st.rerun()
 
 elif page == "Gerenciar Contas e Usuários":
     st.header("Gerenciar Contas (Cartórios) e Usuários")
@@ -175,22 +178,23 @@ elif page == "Gerenciar Contas e Usuários":
         st.subheader("Gerenciar Usuários")
         account_options = {acc['name']: acc['id'] for acc in accounts}
         selected_account_name = st.selectbox("Selecione a Conta para ver/adicionar usuários:", options=sorted(account_options.keys()))
-        selected_account_id = account_options[selected_account_name]
         
-        users = get_users_for_account(selected_account_id, headers)
-        if users is not None:
-            st.write(f"**Usuários em '{selected_account_name}':**")
-            if users: st.dataframe(pd.DataFrame(users), hide_index=True)
-            else: st.info("Nenhum usuário nesta conta.")
-        
-        with st.expander(f"Criar Novo Usuário para '{selected_account_name}'"):
-            full_name = st.text_input("Nome Completo do Usuário")
-            email = st.text_input("Email")
-            password = st.text_input("Senha", type="password")
-            if st.button("Criar Usuário"):
-                if all([full_name, email, password]):
-                    if create_new_user(full_name, email, password, selected_account_id, headers): st.success(f"Usuário '{full_name}' criado!"); st.rerun()
-                else: st.warning("Preencha todos os campos do novo usuário.")
+        if selected_account_name:
+            selected_account_id = account_options[selected_account_name]
+            users = get_users_for_account(selected_account_id, headers)
+            if users is not None:
+                st.write(f"**Usuários em '{selected_account_name}':**")
+                if users: st.dataframe(pd.DataFrame(users), hide_index=True)
+                else: st.info("Nenhum usuário nesta conta.")
+            
+            with st.expander(f"Criar Novo Usuário para '{selected_account_name}'"):
+                full_name = st.text_input("Nome Completo do Usuário")
+                email = st.text_input("Email")
+                password = st.text_input("Senha", type="password")
+                if st.button("Criar Usuário"):
+                    if all([full_name, email, password]):
+                        if create_new_user(full_name, email, password, selected_account_id, headers): st.success(f"Usuário '{full_name}' criado!"); st.rerun()
+                    else: st.warning("Preencha todos os campos do novo usuário.")
 
 elif page == "Dashboard de Faturamento":
     st.header("Dashboard de Faturamento")
