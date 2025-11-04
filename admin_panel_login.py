@@ -1,4 +1,4 @@
-# admin_panel_login.py (VERSÃO FINAL COMPLETA COM CONTEÚDO E LOGIN)
+# admin_panel_login.py (VERSÃO FINAL COM MELHORIAS DE UI)
 
 import streamlit as st
 import requests
@@ -109,22 +109,30 @@ if page == "Gerenciar Prompts":
     prompts = get_all_prompts(headers)
     if prompts is not None:
         if prompts:
-            df = pd.DataFrame(prompts).sort_values(by="id")
-            st.dataframe(df, use_container_width=True)
-            selected_id = st.selectbox("Selecione um prompt para editar/deletar:", options=[p['id'] for p in prompts], format_func=lambda x: f"ID {x} - {next(p['name'] for p in prompts if p['id'] == x)}")
+            df = pd.DataFrame(prompts)
+            
+            # --- ALTERAÇÃO APLICADA AQUI: Reordenar e selecionar colunas para exibição ---
+            df_display = df[['id', 'name']].sort_values(by="id")
+            st.dataframe(df_display, use_container_width=True, hide_index=True)
+            # --- FIM DA ALTERAÇÃO ---
+
+            prompt_options = {f"ID {p['id']} - {p['name']}": p['id'] for p in prompts}
+            selected_option = st.selectbox("Selecione um prompt para editar/deletar:", options=prompt_options.keys())
+            selected_id = prompt_options[selected_option]
             
             selected_prompt = next((p for p in prompts if p['id'] == selected_id), None)
             
-            with st.expander(f"Editar Prompt Selecionado (ID: {selected_id})"):
+            with st.expander(f"Editar Prompt Selecionado (ID: {selected_id})", expanded=True):
                 if selected_prompt:
+                    # O texto do prompt continua visível aqui dentro do editor
                     edit_name = st.text_input("Nome do Prompt", value=selected_prompt['name'], key=f"edit_name_{selected_id}")
                     edit_text = st.text_area("Texto do Prompt", value=selected_prompt['prompt_text'], height=200, key=f"edit_text_{selected_id}")
                     col1, col2 = st.columns([1, 5])
                     with col1:
-                        if st.button("Salvar Alterações", use_container_width=True):
+                        if st.button("Salvar Alterações", use_container_width=True, key=f"save_{selected_id}"):
                             if update_prompt(selected_id, edit_name, edit_text, headers): st.success("Prompt atualizado!"); st.rerun()
                     with col2:
-                        if st.button("Deletar Prompt", type="primary", use_container_width=True):
+                        if st.button("Deletar Prompt", type="primary", use_container_width=True, key=f"delete_{selected_id}"):
                             if delete_prompt(selected_id, headers): st.success("Prompt deletado!"); st.rerun()
         else: st.info("Nenhum prompt encontrado.")
 
@@ -149,11 +157,19 @@ elif page == "Gerenciar Permissões":
         current_permissions = get_account_permissions(selected_account_id, headers)
         
         prompt_options = sorted(prompts, key=lambda p: p['id'])
-        selections = []
-        for prompt in prompt_options:
-            is_checked = prompt['id'] in current_permissions
-            selections.append(st.checkbox(f"ID {prompt['id']} - {prompt['name']}", value=is_checked, key=f"perm_{prompt['id']}"))
-        
+        selections = [False] * len(prompt_options)
+
+        # --- ALTERAÇÃO APLICADA AQUI: Usar 3 colunas para os checkboxes ---
+        col1, col2, col3 = st.columns(3)
+        columns = [col1, col2, col3]
+
+        for i, prompt in enumerate(prompt_options):
+            with columns[i % 3]:
+                is_checked = prompt['id'] in current_permissions
+                key = f"perm_{selected_account_id}_{prompt['id']}"
+                selections[i] = st.checkbox(f"ID {prompt['id']} - {prompt['name']}", value=is_checked, key=key)
+        # --- FIM DA ALTERAÇÃO ---
+
         if st.button("Salvar Permissões"):
             selected_ids = [prompt_options[i]['id'] for i, selected in enumerate(selections) if selected]
             if sync_account_permissions(selected_account_id, selected_ids, headers):
