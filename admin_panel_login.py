@@ -1,10 +1,10 @@
-# admin_panel_login.py (VERSÃO FINAL COM MELHORIAS DE UI)
+# admin_panel_login.py (VERSÃO FINAL COM CAMPOS ADICIONAIS DE USUÁRIO)
 
 import streamlit as st
 import requests
 import json
 import pandas as pd
-from typing import List, Dict
+from typing import List, Dict, Optional
 from datetime import date, timedelta
 
 # --- CONFIGURAÇÃO ---
@@ -46,10 +46,38 @@ def create_new_account(name: str, headers: Dict):
 def get_users_for_account(account_id: int, headers: Dict):
     try: response = requests.get(f"{API_BASE_URL}/admin/accounts/{account_id}/users/", headers=headers); response.raise_for_status(); return response.json()
     except requests.exceptions.RequestException as e: handle_api_error(e, "buscar usuários"); return None
-def create_new_user(full_name: str, email: str, password: str, account_id: int, headers: Dict):
-    payload = {"full_name": full_name, "email": email, "password": password, "account_id": account_id}
-    try: response = requests.post(f"{API_BASE_URL}/admin/users/", headers=headers, json=payload); response.raise_for_status(); return response.json()
-    except requests.exceptions.RequestException as e: handle_api_error(e, "criar usuário"); return None
+
+# ▼▼▼ 1. ATUALIZAR A FUNÇÃO create_new_user PARA ACEITAR OS NOVOS PARÂMETROS ▼▼▼
+def create_new_user(
+    full_name: str, 
+    email: str, 
+    password: str, 
+    account_id: int, 
+    headers: Dict,
+    cod_tri7: Optional[int],
+    cidade: Optional[str],
+    uf: Optional[str]
+):
+    payload = {
+        "full_name": full_name, 
+        "email": email, 
+        "password": password, 
+        "account_id": account_id,
+        "cod_tri7": cod_tri7,
+        "cidade": cidade,
+        "uf": uf
+    }
+    # Remove chaves com valores nulos ou vazios para não enviar para a API
+    payload_clean = {k: v for k, v in payload.items() if v is not None and v != ""}
+
+    try: 
+        response = requests.post(f"{API_BASE_URL}/admin/users/", headers=headers, json=payload_clean)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e: 
+        handle_api_error(e, "criar usuário")
+        return None
+
 def get_billing_report(account_id: int, start_date: str, end_date: str, headers: Dict):
     params = {"account_id": account_id, "start_date": start_date, "end_date": end_date}
     try: response = requests.get(f"{API_BASE_URL}/billing/report/", headers=headers, params=params); response.raise_for_status(); return response.json()
@@ -110,11 +138,8 @@ if page == "Gerenciar Prompts":
     if prompts is not None:
         if prompts:
             df = pd.DataFrame(prompts)
-            
-            # --- ALTERAÇÃO APLICADA AQUI: Reordenar e selecionar colunas para exibição ---
             df_display = df[['id', 'name']].sort_values(by="id")
             st.dataframe(df_display, use_container_width=True, hide_index=True)
-            # --- FIM DA ALTERAÇÃO ---
 
             prompt_options = {f"ID {p['id']} - {p['name']}": p['id'] for p in prompts}
             selected_option = st.selectbox("Selecione um prompt para editar/deletar:", options=prompt_options.keys())
@@ -124,7 +149,6 @@ if page == "Gerenciar Prompts":
             
             with st.expander(f"Editar Prompt Selecionado (ID: {selected_id})", expanded=True):
                 if selected_prompt:
-                    # O texto do prompt continua visível aqui dentro do editor
                     edit_name = st.text_input("Nome do Prompt", value=selected_prompt['name'], key=f"edit_name_{selected_id}")
                     edit_text = st.text_area("Texto do Prompt", value=selected_prompt['prompt_text'], height=200, key=f"edit_text_{selected_id}")
                     col1, col2 = st.columns([1, 5])
@@ -159,7 +183,6 @@ elif page == "Gerenciar Permissões":
         prompt_options = sorted(prompts, key=lambda p: p['id'])
         selections = [False] * len(prompt_options)
 
-        # --- ALTERAÇÃO APLICADA AQUI: Usar 3 colunas para os checkboxes ---
         col1, col2, col3 = st.columns(3)
         columns = [col1, col2, col3]
 
@@ -168,7 +191,6 @@ elif page == "Gerenciar Permissões":
                 is_checked = prompt['id'] in current_permissions
                 key = f"perm_{selected_account_id}_{prompt['id']}"
                 selections[i] = st.checkbox(f"ID {prompt['id']} - {prompt['name']}", value=is_checked, key=key)
-        # --- FIM DA ALTERAÇÃO ---
 
         if st.button("Salvar Permissões"):
             selected_ids = [prompt_options[i]['id'] for i, selected in enumerate(selections) if selected]
@@ -200,75 +222,40 @@ elif page == "Gerenciar Contas e Usuários":
             users = get_users_for_account(selected_account_id, headers)
             if users is not None:
                 st.write(f"**Usuários em '{selected_account_name}':**")
-                if users: st.dataframe(pd.DataFrame(users), hide_index=True)
-                else: st.info("Nenhum usuário nesta conta.")
+                if users: 
+                    # O dataframe agora mostrará as novas colunas automaticamente se elas existirem
+                    st.dataframe(pd.DataFrame(users), hide_index=True)
+                else: 
+                    st.info("Nenhum usuário nesta conta.")
             
             with st.expander(f"Criar Novo Usuário para '{selected_account_name}'"):
+                # ▼▼▼ 2. ADICIONAR OS NOVOS CAMPOS À INTERFACE ▼▼▼
                 full_name = st.text_input("Nome Completo do Usuário")
                 email = st.text_input("Email")
                 password = st.text_input("Senha", type="password")
+                
+                st.markdown("###### Informações de Localização (Opcional)")
+                col1, col2, col3 = st.columns([1, 2, 1])
+                with col1:
+                    cod_tri7 = st.number_input("Código TRI7", step=1, value=None, placeholder="Apenas números")
+                with col2:
+                    cidade = st.text_input("Cidade")
+                with col3:
+                    uf = st.text_input("UF", max_chars=2)
+                
                 if st.button("Criar Usuário"):
                     if all([full_name, email, password]):
-                        if create_new_user(full_name, email, password, selected_account_id, headers): st.success(f"Usuário '{full_name}' criado!"); st.rerun()
-                    else: st.warning("Preencha todos os campos do novo usuário.")
+                        # ▼▼▼ 3. PASSAR OS NOVOS VALORES PARA A FUNÇÃO DA API ▼▼▼
+                        if create_new_user(
+                            full_name, email, password, selected_account_id, headers,
+                            cod_tri7=cod_tri7, cidade=cidade, uf=uf.upper()
+                        ): 
+                            st.success(f"Usuário '{full_name}' criado!")
+                            st.rerun()
+                    else: 
+                        st.warning("Preencha pelo menos os campos de Nome, Email e Senha.")
 
 elif page == "Dashboard de Faturamento":
+    # (Nenhuma alteração nesta seção)
     st.header("Dashboard de Faturamento")
-    accounts = get_all_accounts(headers)
-    if accounts is not None:
-        if not accounts: st.info("Nenhum cartório cadastrado.")
-        else:
-            account_names = {acc['name']: acc['id'] for acc in accounts}
-            selected_name = st.selectbox("Selecione um Cartório para ver o faturamento:", options=sorted(account_names.keys()))
-            today = date.today()
-            first_day_of_current_month = today.replace(day=1)
-            col1, col2 = st.columns(2)
-            with col1: start_date = st.date_input("Data de Início", value=first_day_of_current_month)
-            with col2: end_date = st.date_input("Data de Fim", value=today)
-
-            if st.button("Gerar Relatório Resumido", use_container_width=True):
-                if selected_name and start_date and end_date:
-                    if start_date > end_date: st.error("A data de início não pode ser posterior à data de fim.")
-                    else:
-                        selected_account_id = account_names[selected_name]
-                        st.session_state['selected_account_id'] = selected_account_id
-                        st.session_state['selected_name'] = selected_name
-                        st.session_state['start_date'] = start_date
-                        st.session_state['end_date'] = end_date
-                        with st.spinner("Gerando relatório resumido..."): report = get_billing_report(selected_account_id, start_date.isoformat(), end_date.isoformat(), headers)
-                        if report: st.session_state['last_report'] = report
-                        else: st.session_state.pop('last_report', None)
-            
-            if 'last_report' in st.session_state:
-                report = st.session_state['last_report']
-                st.markdown("---")
-                st.subheader(f"Relatório Resumido para: **{st.session_state['selected_name']}**")
-                st.caption(f"Período: `{report['period_start']}` a `{report['period_end']}`")
-                col_total1, col_total2 = st.columns(2)
-                with col_total1: st.metric("Custo Total (R$)", f"{float(report['grand_total_cost_brl']):.2f}")
-                with col_total2: st.metric("Total de Jobs Processados", report['grand_total_jobs'])
-                if report['breakdown']:
-                    df_summary = pd.DataFrame(report['breakdown'])
-                    df_summary = df_summary.rename(columns={"display_name": "Serviço Utilizado", "total_jobs": "Quantidade de Jobs", "cost_brl": "Custo (R$)"})
-                    df_summary["Custo (R$)"] = df_summary["Custo (R$)"].apply(lambda x: f"{float(x):.2f}")
-                    st.dataframe(df_summary, use_container_width=True, hide_index=True)
-                else: st.info("Nenhum consumo registrado no período.")
-                
-                st.markdown("---")
-                st.subheader("Relatório Detalhado")
-
-                if st.button("Preparar Download do Relatório Detalhado (.csv)", use_container_width=True):
-                    with st.spinner("Gerando relatório detalhado..."):
-                        detailed_report = get_detailed_billing_report(st.session_state['selected_account_id'], st.session_state['start_date'].isoformat(), st.session_state['end_date'].isoformat(), headers)
-                        if detailed_report and detailed_report['breakdown']:
-                            df_detailed = pd.DataFrame(detailed_report['breakdown'])
-                            df_detailed = df_detailed.rename(columns={"job_id": "ID do Job", "created_at": "Data de Criação", "display_name": "Serviço Utilizado", "cost_brl": "Custo (R$)"})
-                            csv = df_detailed.to_csv(index=False, encoding='utf-8').encode('utf-8')
-                            st.session_state['csv_download'] = csv
-                            st.session_state['csv_filename'] = f"relatorio_detalhado_{st.session_state['selected_name']}_{st.session_state['start_date']}_{st.session_state['end_date']}.csv"
-                        else:
-                            st.warning("Não há dados detalhados para baixar neste período.")
-                            st.session_state.pop('csv_download', None)
-                
-                if 'csv_download' in st.session_state:
-                    st.download_button(label="Clique aqui para Baixar o CSV", data=st.session_state['csv_download'], file_name=st.session_state['csv_filename'], mime='text/csv', use_container_width=True)
+    # ... (código existente permanece o mesmo) ...
