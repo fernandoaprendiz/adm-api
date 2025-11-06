@@ -1,4 +1,4 @@
-# admin_panel_login.py (VERSÃO FINAL, ROBUSTA E COM CORREÇÃO DE PERMISSÕES E VISUAL)
+# admin_panel_login.py (VERSÃO FINAL, COM CORREÇÃO DE SINTAXE)
 
 import streamlit as st
 import requests
@@ -140,7 +140,6 @@ if page == "Gerenciar Contas e Usuários":
             users = get_users_for_account(selected_account_id, headers)
             if users is not None:
                 st.write(f"**Usuários em '{selected_account_name}':**")
-                # ▼▼▼ CORREÇÃO APLICADA AQUI ▼▼▼
                 if users:
                     st.dataframe(pd.DataFrame(users), hide_index=True)
                 else:
@@ -246,7 +245,18 @@ elif page == "Dashboard de Faturamento":
         if 'detailed_report_data' in st.session_state and st.session_state['detailed_report_data']:
             st.markdown("---"); st.subheader("Exportar Relatório Detalhado")
             df = pd.DataFrame(st.session_state['detailed_report_data'])
-            df_export = df.rename(columns={'job_id': 'ID do Job', 'created_at': 'Data', 'account_name': 'Cartório', 'user_name': 'Usuário', 'prompt_name': 'Prompt', 'display_name': 'Modelo', 'cost_brl': 'Custo (R$)})
+            
+            # ▼▼▼ CORREÇÃO DE SINTAXE APLICADA AQUI ▼▼▼
+            df_export = df.rename(columns={
+                'job_id': 'ID do Job', 
+                'created_at': 'Data', 
+                'account_name': 'Cartório', 
+                'user_name': 'Usuário', 
+                'prompt_name': 'Prompt', 
+                'display_name': 'Modelo', 
+                'cost_brl': 'Custo (R$)'
+            })
+            
             final_columns = ['Data', 'Cartório', 'Usuário', 'ID do Job', 'Prompt', 'Modelo', 'Custo (R$)']
             df_export = df_export[final_columns]
             df_export['Data'] = pd.to_datetime(df_export['Data']).dt.strftime('%d/%m/%Y %H:%M:%S')
