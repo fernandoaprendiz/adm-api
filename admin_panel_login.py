@@ -1,4 +1,4 @@
-# admin_panel_login.py (VERSÃO FINAL, ROBUSTA E COM CORREÇÃO DE FORMULÁRIOS)
+# admin_panel_login.py (VERSÃO FINAL, ROBUSTA E COM CORREÇÃO DE PERMISSÕES)
 
 import streamlit as st
 import requests
@@ -23,8 +23,7 @@ def handle_api_error(error: requests.exceptions.RequestException, context: str):
         detail = error.response.text
     st.error(f"Erro ao {context}: {detail}")
 
-# --- FUNÇÕES DE API (COMPLETAS) ---
-# (Todas as funções de API permanecem corretas e sem alterações)
+# --- FUNÇÕES DE API (COM CACHE PARA MELHORAR PERFORMANCE) ---
 @st.cache_data(ttl=60)
 def get_all_prompts(headers: Dict):
     try: response = requests.get(f"{API_BASE_URL}/admin/prompts/", headers=headers); response.raise_for_status(); return response.json()
@@ -199,8 +198,12 @@ elif page == "Gerenciar Permissões":
             for i, prompt in enumerate(prompts):
                 with cols[i % 3]:
                     is_checked = prompt['id'] in current_permissions
-                    if st.checkbox(f"ID {prompt['id']} - {prompt['name']}", value=is_checked, key=f"perm_{prompt['id']}"):
+                    # ▼▼▼ CORREÇÃO APLICADA AQUI ▼▼▼
+                    # A chave agora inclui o ID da conta para ser verdadeiramente única
+                    key = f"perm_{selected_account_id}_{prompt['id']}"
+                    if st.checkbox(f"ID {prompt['id']} - {prompt['name']}", value=is_checked, key=key):
                         new_permission_ids.append(prompt['id'])
+
             if st.form_submit_button("Salvar Permissões"):
                 if sync_account_permissions(selected_account_id, new_permission_ids, headers):
                     st.success("Permissões salvas com sucesso!"); st.rerun()
@@ -249,5 +252,11 @@ elif page == "Dashboard de Faturamento":
             df_export['Custo (R$)'] = df_export['Custo (R$)'].astype(float)
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                df_export.to_excel(writer, index=False, sheet_name='Relatorio'); writer.sheets['RelatorioFaturamento'].set_column('A:G', 20)
+                df_export.to_excel(writer, index=False, sheet_name='RelatorioFaturamento')
+                worksheet = writer.sheets['RelatorioFaturamento']
+                for i, col in enumerate(df_export.columns):
+                    column_len = df_export[col].astype(str).str.len().max()
+                    column_len = max(column_len, len(col)) + 2
+                    worksheet.set_column(i, i, column_len)
+
             st.download_button(label="Baixar Relatório Detalhado (.xlsx)", data=output.getvalue(), file_name=f"relatorio_{start_date}_a_{end_date}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
