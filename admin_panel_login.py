@@ -1,4 +1,4 @@
-# admin_panel_login.py (VERSÃO CORRIGIDA - Lógica de Localização na Conta e Bug do Formulário)
+# admin_panel_login.py (VERSÃO FINAL E COMPLETA - CORRIGIDO)
 
 import streamlit as st
 import requests
@@ -18,8 +18,7 @@ def handle_api_error(error: requests.exceptions.RequestException, context: str):
         detail = error.response.text
     st.error(f"Erro ao {context}: {detail}")
 
-# --- FUNÇÕES DE API ---
-# (Todas as funções de API permanecem corretas e sem alterações)
+# --- FUNÇÕES DE API (COMPLETAS E CORRIGIDAS) ---
 def get_all_prompts(headers: Dict):
     try: response = requests.get(f"{API_BASE_URL}/admin/prompts/", headers=headers); response.raise_for_status(); return response.json()
     except requests.exceptions.RequestException as e: handle_api_error(e, "buscar prompts"); return None
@@ -129,7 +128,6 @@ if page == "Gerenciar Contas e Usuários":
                 with col3:
                     uf = st.text_input("UF", max_chars=2)
 
-                # ▼▼▼ CORREÇÃO APLICADA AQUI ▼▼▼
                 if st.form_submit_button("Criar Conta"):
                     if new_account_name:
                         if create_new_account(
@@ -171,13 +169,98 @@ if page == "Gerenciar Contas e Usuários":
                         else: 
                             st.warning("Preencha os campos de Nome, Email e Senha.")
                             
-# As outras páginas permanecem sem alterações
+# ▼▼▼ CÓDIGO RESTAURADO PARA AS OUTRAS PÁGINAS ▼▼▼
 elif page == "Gerenciar Prompts":
     st.header("Gerenciar Catálogo de Prompts")
-    # ... (código existente)
+    prompts = get_all_prompts(headers)
+    if prompts is not None:
+        if prompts:
+            df = pd.DataFrame(prompts)
+            df_display = df[['id', 'name']].sort_values(by="id")
+            st.dataframe(df_display, use_container_width=True, hide_index=True)
+
+            prompt_options = {f"ID {p['id']} - {p['name']}": p['id'] for p in prompts}
+            selected_option = st.selectbox("Selecione um prompt para editar/deletar:", options=prompt_options.keys())
+            selected_id = prompt_options[selected_option]
+            
+            selected_prompt = next((p for p in prompts if p['id'] == selected_id), None)
+            
+            with st.expander(f"Editar Prompt Selecionado (ID: {selected_id})", expanded=True):
+                if selected_prompt:
+                    edit_name = st.text_input("Nome do Prompt", value=selected_prompt['name'], key=f"edit_name_{selected_id}")
+                    edit_text = st.text_area("Texto do Prompt", value=selected_prompt['prompt_text'], height=200, key=f"edit_text_{selected_id}")
+                    col1, col2 = st.columns([1, 5])
+                    with col1:
+                        if st.button("Salvar Alterações", use_container_width=True, key=f"save_{selected_id}"):
+                            if update_prompt(selected_id, edit_name, edit_text, headers): st.success("Prompt atualizado!"); st.rerun()
+                    with col2:
+                        if st.button("Deletar Prompt", type="primary", use_container_width=True, key=f"delete_{selected_id}"):
+                            if delete_prompt(selected_id, headers): st.success("Prompt deletado!"); st.rerun()
+        else: st.info("Nenhum prompt encontrado.")
+
+    with st.expander("Criar Novo Prompt"):
+        new_name = st.text_input("Nome do Novo Prompt", key="new_name")
+        new_text = st.text_area("Texto do Novo Prompt", height=200, key="new_text")
+        if st.button("Criar Prompt"):
+            if new_name and new_text:
+                if create_new_prompt(new_name, new_text, headers): st.success(f"Prompt '{new_name}' criado!"); st.rerun()
+            else: st.warning("Preencha todos os campos.")
+
 elif page == "Gerenciar Permissões":
     st.header("Gerenciar Permissões por Cartório")
-    # ... (código existente)
+    accounts = get_all_accounts(headers)
+    prompts = get_all_prompts(headers)
+    if accounts is not None and prompts is not None:
+        account_names = {acc['name']: acc['id'] for acc in accounts}
+        selected_name = st.selectbox("Selecione um Cartório:", options=sorted(account_names.keys()))
+        selected_account_id = account_names[selected_name]
+        
+        st.subheader(f"Editando permissões para: {selected_name}")
+        current_permissions = get_account_permissions(selected_account_id, headers)
+        
+        prompt_options = sorted(prompts, key=lambda p: p['id'])
+        selections = [False] * len(prompt_options)
+
+        col1, col2, col3 = st.columns(3)
+        columns = [col1, col2, col3]
+
+        for i, prompt in enumerate(prompt_options):
+            with columns[i % 3]:
+                is_checked = prompt['id'] in current_permissions
+                key = f"perm_{selected_account_id}_{prompt['id']}"
+                selections[i] = st.checkbox(f"ID {prompt['id']} - {prompt['name']}", value=is_checked, key=key)
+
+        if st.button("Salvar Permissões"):
+            selected_ids = [prompt_options[i]['id'] for i, selected in enumerate(selections) if selected]
+            if sync_account_permissions(selected_account_id, selected_ids, headers):
+                st.success("Permissões salvas com sucesso!")
+                st.rerun()
+
 elif page == "Dashboard de Faturamento":
     st.header("Dashboard de Faturamento")
-    # ... (código existente)
+    accounts = get_all_accounts(headers)
+    if accounts:
+        account_options = {acc['name']: acc['id'] for acc in accounts}
+        selected_account_name = st.selectbox("Selecione a Conta:", options=sorted(account_options.keys()))
+        selected_account_id = account_options[selected_account_name]
+
+        today = date.today()
+        default_start = today - timedelta(days=30)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            start_date = st.date_input("Data de Início", value=default_start)
+        with col2:
+            end_date = st.date_input("Data de Fim", value=today)
+
+        if st.button("Gerar Relatório"):
+            if start_date and end_date and selected_account_id:
+                report = get_billing_report(selected_account_id, str(start_date), str(end_date), headers)
+                if report:
+                    st.subheader("Relatório Resumido de Consumo")
+                    st.json(report)
+
+                detailed_report = get_detailed_billing_report(selected_account_id, str(start_date), str(end_date), headers)
+                if detailed_report:
+                    st.subheader("Relatório Detalhado por Job")
+                    st.dataframe(pd.DataFrame(detailed_report), hide_index=True)
