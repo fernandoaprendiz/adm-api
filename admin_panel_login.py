@@ -1,4 +1,4 @@
-# admin_panel_login.py (VERSÃO FINAL, COM CORREÇÃO DE SINTAXE)
+# admin_panel_login.py (VERSÃO FINAL, COM CORREÇÃO NA EXIBIÇÃO DA API KEY)
 
 import streamlit as st
 import requests
@@ -149,11 +149,21 @@ if page == "Gerenciar Contas e Usuários":
                     full_name = st.text_input("Nome Completo do Usuário")
                     email = st.text_input("Email")
                     password = st.text_input("Senha", type="password")
+                    
+                    # ▼▼▼ CORREÇÃO APLICADA AQUI ▼▼▼
                     if st.form_submit_button("Criar Usuário"):
                         if all([full_name, email, password]):
-                            if create_new_user(full_name, email, password, selected_account_id, headers): 
-                                st.success(f"Usuário '{full_name}' criado!"); st.rerun()
-                        else: st.warning("Preencha os campos de Nome, Email e Senha.")
+                            with st.spinner("Criando usuário..."):
+                                # 1. Salvar a resposta da API
+                                response = create_new_user(full_name, email, password, selected_account_id, headers)
+                                # 2. Verificar se a resposta é válida e exibir a chave
+                                if response:
+                                    st.success(f"Usuário '{response['full_name']}' criado com sucesso!")
+                                    st.info("API Key gerada (copie e envie ao usuário, ela não será exibida novamente):")
+                                    st.code(response['api_key'])
+                                    # 3. Remover o st.rerun() para permitir a exibição
+                        else: 
+                            st.warning("Preencha os campos de Nome, Email e Senha.")
                             
 elif page == "Gerenciar Prompts":
     st.header("Gerenciar Catálogo de Prompts")
@@ -245,8 +255,6 @@ elif page == "Dashboard de Faturamento":
         if 'detailed_report_data' in st.session_state and st.session_state['detailed_report_data']:
             st.markdown("---"); st.subheader("Exportar Relatório Detalhado")
             df = pd.DataFrame(st.session_state['detailed_report_data'])
-            
-            # ▼▼▼ CORREÇÃO DE SINTAXE APLICADA AQUI ▼▼▼
             df_export = df.rename(columns={
                 'job_id': 'ID do Job', 
                 'created_at': 'Data', 
