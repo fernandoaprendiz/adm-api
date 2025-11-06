@@ -1,4 +1,4 @@
-# admin_panel_login.py (VERSÃO FINAL COM CAMPOS ADICIONAIS DE USUÁRIO)
+# admin_panel_login.py (VERSÃO CORRIGIDA - Lógica de Localização na Conta)
 
 import streamlit as st
 import requests
@@ -18,7 +18,8 @@ def handle_api_error(error: requests.exceptions.RequestException, context: str):
         detail = error.response.text
     st.error(f"Erro ao {context}: {detail}")
 
-# --- FUNÇÕES DE API (COMPLETAS) ---
+# --- FUNÇÕES DE API ---
+# (Funções não relacionadas a Conta/Usuário permanecem iguais)
 def get_all_prompts(headers: Dict):
     try: response = requests.get(f"{API_BASE_URL}/admin/prompts/", headers=headers); response.raise_for_status(); return response.json()
     except requests.exceptions.RequestException as e: handle_api_error(e, "buscar prompts"); return None
@@ -40,38 +41,51 @@ def get_account_permissions(account_id: int, headers: Dict):
 def sync_account_permissions(account_id: int, prompt_ids: List[int], headers: Dict):
     try: response = requests.put(f"{API_BASE_URL}/admin/accounts/{account_id}/permissions", headers=headers, json={"prompt_ids": prompt_ids}); response.raise_for_status(); return True
     except requests.exceptions.RequestException as e: handle_api_error(e, "salvar permissões"); return False
-def create_new_account(name: str, headers: Dict):
-    try: response = requests.post(f"{API_BASE_URL}/admin/accounts/", headers=headers, json={"name": name}); response.raise_for_status(); return response.json()
-    except requests.exceptions.RequestException as e: handle_api_error(e, "criar conta"); return None
-def get_users_for_account(account_id: int, headers: Dict):
-    try: response = requests.get(f"{API_BASE_URL}/admin/accounts/{account_id}/users/", headers=headers); response.raise_for_status(); return response.json()
-    except requests.exceptions.RequestException as e: handle_api_error(e, "buscar usuários"); return None
 
-# ▼▼▼ 1. ATUALIZAR A FUNÇÃO create_new_user PARA ACEITAR OS NOVOS PARÂMETROS ▼▼▼
-def create_new_user(
-    full_name: str, 
-    email: str, 
-    password: str, 
-    account_id: int, 
+# ▼▼▼ 1. ATUALIZAR A FUNÇÃO `create_new_account` PARA ACEITAR OS NOVOS PARÂMETROS ▼▼▼
+def create_new_account(
+    name: str, 
     headers: Dict,
     cod_tri7: Optional[int],
     cidade: Optional[str],
     uf: Optional[str]
 ):
     payload = {
-        "full_name": full_name, 
-        "email": email, 
-        "password": password, 
-        "account_id": account_id,
+        "name": name,
         "cod_tri7": cod_tri7,
         "cidade": cidade,
         "uf": uf
     }
     # Remove chaves com valores nulos ou vazios para não enviar para a API
     payload_clean = {k: v for k, v in payload.items() if v is not None and v != ""}
+    try:
+        response = requests.post(f"{API_BASE_URL}/admin/accounts/", headers=headers, json=payload_clean)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        handle_api_error(e, "criar conta")
+        return None
 
+def get_users_for_account(account_id: int, headers: Dict):
+    try: response = requests.get(f"{API_BASE_URL}/admin/accounts/{account_id}/users/", headers=headers); response.raise_for_status(); return response.json()
+    except requests.exceptions.RequestException as e: handle_api_error(e, "buscar usuários"); return None
+
+# ▼▼▼ 2. SIMPLIFICAR A FUNÇÃO `create_new_user` (REMOVER CAMPOS DE LOCALIZAÇÃO) ▼▼▼
+def create_new_user(
+    full_name: str, 
+    email: str, 
+    password: str, 
+    account_id: int, 
+    headers: Dict
+):
+    payload = {
+        "full_name": full_name, 
+        "email": email, 
+        "password": password, 
+        "account_id": account_id
+    }
     try: 
-        response = requests.post(f"{API_BASE_URL}/admin/users/", headers=headers, json=payload_clean)
+        response = requests.post(f"{API_BASE_URL}/admin/users/", headers=headers, json=payload)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e: 
@@ -125,14 +139,83 @@ st.title("Painel de Gestão - SetDoc AI")
 headers = {"x-api-key": st.session_state.api_key}
 
 st.sidebar.header("Navegação")
-page = st.sidebar.radio("Escolha uma página", ["Gerenciar Prompts", "Gerenciar Permissões", "Gerenciar Contas e Usuários", "Dashboard de Faturamento"])
+page = st.sidebar.radio("Escolha uma página", ["Gerenciar Contas e Usuários", "Gerenciar Prompts", "Gerenciar Permissões", "Dashboard de Faturamento"])
 
 def logout():
     st.session_state.is_authenticated = False
     st.session_state.api_key = ""
 st.sidebar.button("Sair (Logout)", on_click=logout)
 
-if page == "Gerenciar Prompts":
+if page == "Gerenciar Contas e Usuários":
+    st.header("Gerenciar Contas (Cartórios) e Usuários")
+    accounts = get_all_accounts(headers)
+    if accounts is not None:
+        st.subheader("Contas de Cartório Existentes")
+        # ▼▼▼ 3. EXIBIR NOVAS COLUNAS NA TABELA DE CONTAS ▼▼▼
+        # Garante que as colunas apareçam mesmo se não existirem em todos os registros
+        df_accounts = pd.DataFrame(accounts)
+        cols_to_show = ['name', 'cod_tri7', 'cidade', 'uf', 'id', 'created_at']
+        df_accounts_display = df_accounts.reindex(columns=cols_to_show)
+        st.dataframe(df_accounts_display, hide_index=True, use_container_width=True)
+        
+        # ▼▼▼ 4. ATUALIZAR FORMULÁRIO DE CRIAÇÃO DE CONTA ▼▼▼
+        with st.expander("Criar Nova Conta de Cartório"):
+            with st.form("new_account_form", clear_on_submit=True):
+                new_account_name = st.text_input("Nome do Novo Cartório")
+                st.markdown("###### Informações de Localização (Opcional)")
+                col1, col2, col3 = st.columns([1, 2, 1])
+                with col1:
+                    cod_tri7 = st.number_input("Código TRI7", step=1, value=None, placeholder="Apenas números")
+                with col2:
+                    cidade = st.text_input("Cidade")
+                with col3:
+                    uf = st.text_input("UF", max_chars=2)
+
+                if st.button("Criar Conta"):
+                    if new_account_name:
+                        if create_new_account(
+                            new_account_name, headers,
+                            cod_tri7=cod_tri7, cidade=cidade, uf=uf.upper() if uf else None
+                        ):
+                            st.success(f"Conta '{new_account_name}' criada!"); st.rerun()
+                    else:
+                        st.warning("O nome da conta não pode ser vazio.")
+        
+        st.markdown("---")
+        st.subheader("Gerenciar Usuários")
+        account_options = {acc['name']: acc['id'] for acc in accounts}
+        selected_account_name = st.selectbox("Selecione a Conta para ver/adicionar usuários:", options=sorted(account_options.keys()))
+        
+        if selected_account_name:
+            selected_account_id = account_options[selected_account_name]
+            users = get_users_for_account(selected_account_id, headers)
+            if users is not None:
+                st.write(f"**Usuários em '{selected_account_name}':**")
+                if users: 
+                    st.dataframe(pd.DataFrame(users), hide_index=True)
+                else: 
+                    st.info("Nenhum usuário nesta conta.")
+            
+            # ▼▼▼ 5. LIMPAR FORMULÁRIO DE CRIAÇÃO DE USUÁRIO ▼▼▼
+            with st.expander(f"Criar Novo Usuário para '{selected_account_name}'"):
+                with st.form("new_user_form", clear_on_submit=True):
+                    full_name = st.text_input("Nome Completo do Usuário")
+                    email = st.text_input("Email")
+                    password = st.text_input("Senha", type="password")
+                    
+                    if st.button("Criar Usuário"):
+                        if all([full_name, email, password]):
+                            if create_new_user(
+                                full_name, email, password, selected_account_id, headers
+                            ): 
+                                st.success(f"Usuário '{full_name}' criado!")
+                                st.rerun()
+                        else: 
+                            st.warning("Preencha os campos de Nome, Email e Senha.")
+                            
+# (As outras páginas permanecem sem alterações)
+elif page == "Gerenciar Prompts":
+    # ... (código existente) ...
     st.header("Gerenciar Catálogo de Prompts")
     prompts = get_all_prompts(headers)
     if prompts is not None:
@@ -169,6 +252,7 @@ if page == "Gerenciar Prompts":
             else: st.warning("Preencha todos os campos.")
 
 elif page == "Gerenciar Permissões":
+    # ... (código existente) ...
     st.header("Gerenciar Permissões por Cartório")
     accounts = get_all_accounts(headers)
     prompts = get_all_prompts(headers)
@@ -198,64 +282,32 @@ elif page == "Gerenciar Permissões":
                 st.success("Permissões salvas com sucesso!")
                 st.rerun()
 
-elif page == "Gerenciar Contas e Usuários":
-    st.header("Gerenciar Contas (Cartórios) e Usuários")
-    accounts = get_all_accounts(headers)
-    if accounts is not None:
-        st.subheader("Contas de Cartório Existentes")
-        st.dataframe(pd.DataFrame(accounts), hide_index=True)
-        
-        with st.expander("Criar Nova Conta de Cartório"):
-            new_account_name = st.text_input("Nome do Novo Cartório")
-            if st.button("Criar Conta"):
-                if new_account_name:
-                    if create_new_account(new_account_name, headers): st.success(f"Conta '{new_account_name}' criada!"); st.rerun()
-                else: st.warning("O nome da conta não pode ser vazio.")
-        
-        st.markdown("---")
-        st.subheader("Gerenciar Usuários")
-        account_options = {acc['name']: acc['id'] for acc in accounts}
-        selected_account_name = st.selectbox("Selecione a Conta para ver/adicionar usuários:", options=sorted(account_options.keys()))
-        
-        if selected_account_name:
-            selected_account_id = account_options[selected_account_name]
-            users = get_users_for_account(selected_account_id, headers)
-            if users is not None:
-                st.write(f"**Usuários em '{selected_account_name}':**")
-                if users: 
-                    # O dataframe agora mostrará as novas colunas automaticamente se elas existirem
-                    st.dataframe(pd.DataFrame(users), hide_index=True)
-                else: 
-                    st.info("Nenhum usuário nesta conta.")
-            
-            with st.expander(f"Criar Novo Usuário para '{selected_account_name}'"):
-                # ▼▼▼ 2. ADICIONAR OS NOVOS CAMPOS À INTERFACE ▼▼▼
-                full_name = st.text_input("Nome Completo do Usuário")
-                email = st.text_input("Email")
-                password = st.text_input("Senha", type="password")
-                
-                st.markdown("###### Informações de Localização (Opcional)")
-                col1, col2, col3 = st.columns([1, 2, 1])
-                with col1:
-                    cod_tri7 = st.number_input("Código TRI7", step=1, value=None, placeholder="Apenas números")
-                with col2:
-                    cidade = st.text_input("Cidade")
-                with col3:
-                    uf = st.text_input("UF", max_chars=2)
-                
-                if st.button("Criar Usuário"):
-                    if all([full_name, email, password]):
-                        # ▼▼▼ 3. PASSAR OS NOVOS VALORES PARA A FUNÇÃO DA API ▼▼▼
-                        if create_new_user(
-                            full_name, email, password, selected_account_id, headers,
-                            cod_tri7=cod_tri7, cidade=cidade, uf=uf.upper()
-                        ): 
-                            st.success(f"Usuário '{full_name}' criado!")
-                            st.rerun()
-                    else: 
-                        st.warning("Preencha pelo menos os campos de Nome, Email e Senha.")
-
 elif page == "Dashboard de Faturamento":
-    # (Nenhuma alteração nesta seção)
+    # ... (código existente) ...
     st.header("Dashboard de Faturamento")
-    # ... (código existente permanece o mesmo) ...
+    accounts = get_all_accounts(headers)
+    if accounts:
+        account_options = {acc['name']: acc['id'] for acc in accounts}
+        selected_account_name = st.selectbox("Selecione a Conta:", options=sorted(account_options.keys()))
+        selected_account_id = account_options[selected_account_name]
+
+        today = date.today()
+        default_start = today - timedelta(days=30)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            start_date = st.date_input("Data de Início", value=default_start)
+        with col2:
+            end_date = st.date_input("Data de Fim", value=today)
+
+        if st.button("Gerar Relatório"):
+            if start_date and end_date and selected_account_id:
+                report = get_billing_report(selected_account_id, str(start_date), str(end_date), headers)
+                if report:
+                    st.subheader("Relatório Resumido de Consumo")
+                    st.json(report)
+
+                detailed_report = get_detailed_billing_report(selected_account_id, str(start_date), str(end_date), headers)
+                if detailed_report:
+                    st.subheader("Relatório Detalhado por Job")
+                    st.dataframe(pd.DataFrame(detailed_report), hide_index=True)
