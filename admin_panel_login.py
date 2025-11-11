@@ -1,4 +1,4 @@
-# admin_panel_login.py (VERSÃO FINAL SIMPLIFICADA E COMPLETA)
+# admin_panel_login.py (VERSÃO FINAL COM TODAS AS FERRAMENTAS E TRAVAS DE SEGURANÇA)
 
 import streamlit as st
 import requests
@@ -10,10 +10,8 @@ API_BASE_URL = "https://setdoc-api-gateway-308638875599.southamerica-east1.run.a
 
 st.set_page_config(layout="wide", page_title="Painel de Gestão SetDoc AI")
 
-# --- FUNÇÕES DE API (COM CACHE PARA MELHORAR PERFORMANCE) ---
-
+# --- FUNÇÕES DE API ---
 def handle_api_error(e: requests.exceptions.RequestException, action: str):
-    """Função centralizada para lidar com erros de API."""
     st.error(f"Falha ao {action}.")
     if e.response is not None:
         try: st.error(f"Detalhe: {e.response.json().get('detail', e.response.text)}")
@@ -28,11 +26,9 @@ def get_all_accounts(headers: Dict) -> Optional[List[Dict]]:
     except requests.exceptions.RequestException as e:
         handle_api_error(e, "buscar contas"); return None
 
-def create_new_account(name: str, headers: Dict, **kwargs):
-    payload = {"name": name, **kwargs}
-    payload_clean = {k: v for k, v in payload.items() if v is not None and v != ""}
+def create_new_account(name: str, headers: Dict):
     try:
-        response = requests.post(f"{API_BASE_URL}/admin/accounts/", headers=headers, json=payload_clean)
+        response = requests.post(f"{API_BASE_URL}/admin/accounts/", headers=headers, json={"name": name})
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
@@ -80,12 +76,11 @@ def regenerate_api_key(user_id: int, headers: Dict) -> Optional[str]:
     except requests.exceptions.RequestException as e:
         handle_api_error(e, "regenerar chave de API"); return None
 
-# --- As funções de Prompts e Permissões podem ser adicionadas aqui ---
-
 # --- INICIALIZAÇÃO DA SESSÃO ---
 if 'is_authenticated' not in st.session_state: st.session_state.is_authenticated = False
 if 'api_key' not in st.session_state: st.session_state.api_key = ""
 if 'new_api_key_info' not in st.session_state: st.session_state.new_api_key_info = None
+if 'confirm_action' not in st.session_state: st.session_state.confirm_action = None
 
 # --- TELA DE LOGIN ---
 if not st.session_state.is_authenticated:
@@ -110,7 +105,6 @@ st.title("Painel de Gestão - SetDoc AI")
 headers = {"x-api-key": st.session_state.api_key}
 
 st.sidebar.header("Navegação")
-# --- PÁGINAS RESTAURADAS ---
 page = st.sidebar.radio("Escolha uma página", ["Gerenciar Contas e Usuários", "Gerenciar Prompts", "Gerenciar Permissões", "Dashboard de Faturamento"])
 
 def logout():
@@ -118,112 +112,132 @@ def logout():
     st.rerun()
 st.sidebar.button("Sair (Logout)", on_click=logout, use_container_width=True)
 
-# Exibe a nova API Key gerada (se houver)
 if st.session_state.new_api_key_info:
     user_name, new_key = st.session_state.new_api_key_info
     st.success(f"Nova API Key gerada para '{user_name}'! Copie e envie ao usuário, ela não será exibida novamente.")
     st.code(new_key)
-    st.session_state.new_api_key_info = None # Limpa após exibir
+    st.session_state.new_api_key_info = None
 
 if page == "Gerenciar Contas e Usuários":
-    st.header("Gerenciar Contas (Cartórios)")
-    
     accounts = get_all_accounts(headers)
     if accounts is not None:
-        # Mostra a tabela de contas
+        st.header("Visão Geral das Contas")
         df_accounts = pd.DataFrame(accounts)
         st.dataframe(df_accounts[['name', 'is_active', 'id', 'created_at']], hide_index=True, use_container_width=True)
 
-        # Seção de Ações para Contas
-        st.subheader("Ações nas Contas")
+        st.markdown("---")
+        st.header("Gerenciamento Detalhado")
+        
         account_options = {acc['id']: acc['name'] for acc in accounts}
-        selected_account_id_action = st.selectbox("Selecione uma conta para gerenciar:", options=account_options.keys(), format_func=lambda x: account_options[x])
+        selected_account_id = st.selectbox("Selecione uma conta para gerenciar:", options=account_options.keys(), format_func=lambda x: f"{account_options[x]} (ID: {x})")
         
-        selected_account = next((acc for acc in accounts if acc['id'] == selected_account_id_action), None)
+        selected_account = next((acc for acc in accounts if acc['id'] == selected_account_id), None)
         if selected_account:
-            col1, col2 = st.columns(2)
-            is_active = selected_account.get('is_active', True)
+            st.subheader(f"Ações para a Conta: '{selected_account['name']}'")
             
-            with col1:
-                if is_active:
-                    if st.button("🔴 Desativar Conta", key=f"deact_acc_{selected_account_id_action}", use_container_width=True):
-                        if set_account_status(selected_account_id_action, False, headers):
-                            st.success(f"Conta '{selected_account['name']}' desativada."); st.cache_data.clear(); st.rerun()
-                else:
-                    if st.button("🟢 Reativar Conta", key=f"act_acc_{selected_account_id_action}", use_container_width=True):
-                        if set_account_status(selected_account_id_action, True, headers):
-                            st.success(f"Conta '{selected_account['name']}' reativada."); st.cache_data.clear(); st.rerun()
-        
+            is_active = selected_account.get('is_active', True)
+            action_label = "Desativar" if is_active else "Reativar"
+            action_color = "error" if is_active else "success"
+            
+            if st.button(f"{action_label} Conta", type=action_color, use_container_width=True):
+                st.session_state.confirm_action = ("account_status", selected_account_id, not is_active)
+            
+            if st.session_state.confirm_action and st.session_state.confirm_action[0] == "account_status" and st.session_state.confirm_action[1] == selected_account_id:
+                _, acc_id, new_status = st.session_state.confirm_action
+                action_word = "DESATIVAR" if new_status is False else "REATIVAR"
+                st.warning(f"**Atenção:** Você tem certeza que deseja {action_word} a conta '{selected_account['name']}'?")
+                col1, col2 = st.columns(2)
+                if col1.button("Sim, confirmar", use_container_width=True):
+                    if set_account_status(acc_id, new_status, headers):
+                        st.success("Status da conta atualizado."); st.cache_data.clear()
+                        st.session_state.confirm_action = None; st.rerun()
+                    else: # A API retornou um erro (ex: usuários ativos)
+                        st.session_state.confirm_action = None
+                if col2.button("Não, cancelar", use_container_width=True):
+                    st.session_state.confirm_action = None; st.rerun()
+            
+            st.markdown("---")
+            st.subheader(f"Usuários da Conta: '{selected_account['name']}'")
+            users = get_users_for_account(selected_account_id, headers)
+            if users:
+                st.dataframe(pd.DataFrame(users)[['full_name', 'email', 'is_active', 'id']], hide_index=True, use_container_width=True)
+
+                user_options = {user['id']: user['full_name'] for user in users}
+                selected_user_id = st.selectbox("Selecione um usuário para gerenciar:", options=user_options.keys(), format_func=lambda x: f"{user_options[x]} (ID: {x})")
+                
+                selected_user = next((user for user in users if user['id'] == selected_user_id), None)
+                if selected_user:
+                    cols = st.columns(2)
+                    is_user_active = selected_user.get('is_active', True)
+                    user_action_label = "Desativar" if is_user_active else "Reativar"
+                    user_action_color = "error" if is_user_active else "success"
+
+                    with cols[0]:
+                        if st.button(f"{user_action_label} Usuário", type=user_action_color, use_container_width=True):
+                            st.session_state.confirm_action = ("user_status", selected_user_id, not is_user_active)
+                    with cols[1]:
+                        if st.button("🔑 Regenerar Chave", use_container_width=True):
+                            st.session_state.confirm_action = ("regen_key", selected_user_id)
+
+                    # Lógica de confirmação para ações do usuário
+                    if st.session_state.confirm_action and st.session_state.confirm_action[1] == selected_user_id:
+                        action_type, user_id = st.session_state.confirm_action[0], st.session_state.confirm_action[1]
+
+                        if action_type == "user_status":
+                            new_user_status = st.session_state.confirm_action[2]
+                            action_word = "DESATIVAR" if new_user_status is False else "REATIVAR"
+                            st.warning(f"**Atenção:** Você tem certeza que deseja {action_word} o usuário '{selected_user['full_name']}'?")
+                            col1, col2 = st.columns(2)
+                            if col1.button("Sim, confirmar status", use_container_width=True):
+                                if set_user_status(user_id, new_user_status, headers):
+                                    st.success("Status do usuário atualizado."); st.cache_data.clear()
+                                    st.session_state.confirm_action = None; st.rerun()
+                            if col2.button("Não, cancelar", use_container_width=True):
+                                st.session_state.confirm_action = None; st.rerun()
+
+                        elif action_type == "regen_key":
+                            st.warning(f"**Atenção:** Isso invalidará a chave de API antiga do usuário '{selected_user['full_name']}'. Deseja continuar?")
+                            col1, col2 = st.columns(2)
+                            if col1.button("Sim, regenerar chave", use_container_width=True):
+                                new_key = regenerate_api_key(user_id, headers)
+                                if new_key:
+                                    st.session_state.new_api_key_info = (selected_user['full_name'], new_key)
+                                    st.cache_data.clear()
+                                    st.session_state.confirm_action = None; st.rerun()
+                            if col2.button("Não, cancelar", use_container_width=True):
+                                st.session_state.confirm_action = None; st.rerun()
+
+            with st.expander(f"➕ Criar Novo Usuário para '{selected_account['name']}'"):
+                with st.form("new_user_form", clear_on_submit=True):
+                    full_name = st.text_input("Nome Completo")
+                    email = st.text_input("Email")
+                    password = st.text_input("Senha", type="password")
+                    if st.form_submit_button("Criar Usuário"):
+                        if all([full_name, email, password]):
+                            response = create_new_user(full_name, email, password, selected_account_id, headers)
+                            if response:
+                                st.session_state.new_api_key_info = (response['full_name'], response.get('api_key'))
+                                st.cache_data.clear(); st.rerun()
+                        else: st.warning("Preencha todos os campos.")
+
+        st.markdown("---")
         with st.expander("➕ Criar Nova Conta"):
-            with st.form("new_account_form", clear_on_submit=True):
+            with st.form("new_account_form_2", clear_on_submit=True):
                 new_account_name = st.text_input("Nome do Novo Cartório")
                 if st.form_submit_button("Criar Conta"):
                     if new_account_name:
                         if create_new_account(new_account_name, headers):
                             st.success(f"Conta '{new_account_name}' criada!"); st.cache_data.clear(); st.rerun()
                     else: st.warning("O nome da conta não pode ser vazio.")
-        
-        st.markdown("---")
-        st.header("Gerenciar Usuários")
-        
-        users = get_users_for_account(selected_account_id_action, headers)
-        if users:
-            st.write(f"**Usuários em '{selected_account['name']}':**")
-            df_users = pd.DataFrame(users)
-            st.dataframe(df_users[['full_name', 'email', 'is_active', 'id']], hide_index=True, use_container_width=True)
-            
-            st.subheader("Ações nos Usuários")
-            user_options = {user['id']: user['full_name'] for user in users}
-            selected_user_id_action = st.selectbox("Selecione um usuário para gerenciar:", options=user_options.keys(), format_func=lambda x: user_options[x])
-            
-            selected_user = next((user for user in users if user['id'] == selected_user_id_action), None)
-            if selected_user:
-                col1, col2, col3 = st.columns(3)
-                is_user_active = selected_user.get('is_active', True)
-                
-                with col1:
-                    if is_user_active:
-                        if st.button("🔴 Desativar Usuário", key=f"deact_usr_{selected_user_id_action}", use_container_width=True):
-                            if set_user_status(selected_user_id_action, False, headers):
-                                st.success("Usuário desativado."); st.cache_data.clear(); st.rerun()
-                    else:
-                        if st.button("🟢 Reativar Usuário", key=f"act_usr_{selected_user_id_action}", use_container_width=True):
-                            if set_user_status(selected_user_id_action, True, headers):
-                                st.success("Usuário reativado."); st.cache_data.clear(); st.rerun()
-                with col2:
-                    if st.button("🔑 Regenerar Chave", key=f"regen_key_{selected_user_id_action}", use_container_width=True):
-                        new_key = regenerate_api_key(selected_user_id_action, headers)
-                        if new_key:
-                            st.session_state.new_api_key_info = (selected_user['full_name'], new_key)
-                            st.cache_data.clear(); st.rerun()
-        else:
-            st.info(f"Nenhum usuário na conta '{selected_account['name']}'.")
-
-        with st.expander(f"➕ Criar Novo Usuário para '{selected_account['name']}'"):
-            with st.form("new_user_form"):
-                full_name = st.text_input("Nome Completo")
-                email = st.text_input("Email")
-                password = st.text_input("Senha", type="password")
-                
-                if st.form_submit_button("Criar Usuário"):
-                    if all([full_name, email, password]):
-                        response = create_new_user(full_name, email, password, selected_account_id_action, headers)
-                        if response:
-                            st.session_state.new_api_key_info = (response['full_name'], response.get('api_key'))
-                            st.cache_data.clear(); st.rerun()
-                    else: st.warning("Preencha todos os campos.")
 
 elif page == "Gerenciar Prompts":
     st.header("Gerenciar Prompts")
-    st.info("Funcionalidade ainda não implementada nesta interface.")
-    # Adicione aqui a lógica para gerenciar prompts, similar à de contas e usuários
+    st.info("Funcionalidade em desenvolvimento.")
 
 elif page == "Gerenciar Permissões":
     st.header("Gerenciar Permissões")
-    st.info("Funcionalidade ainda não implementada nesta interface.")
-    # Adicione aqui a lógica para gerenciar permissões
+    st.info("Funcionalidade em desenvolvimento.")
 
 elif page == "Dashboard de Faturamento":
     st.header("Dashboard de Faturamento")
-    st.info("Funcionalidade ainda não implementada nesta interface.")
-    # Adicione aqui a lógica para o dashboard de faturamento
+    st.info("Funcionalidade em desenvolvimento.")
