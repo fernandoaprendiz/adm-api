@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from shared_funcs import check_admin_auth
 
-st.set_page_config(layout="wide", page_title="Painel de Gestão SetDoc AI")
+st.set_page_config(layout="wide", page_title="Painel de Gestão Tri7 AI")
 
 # --- INICIALIZAÇÃO DA SESSÃO ---
 st.session_state.setdefault('is_authenticated', False)
@@ -45,3 +45,4 @@ st.sidebar.button("Sair (Logout)", on_click=logout, use_container_width=True)
 
 st.sidebar.header("Módulos")
 st.markdown("Selecione um módulo na barra lateral para começar.")
+
