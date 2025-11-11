@@ -33,7 +33,7 @@ if not st.session_state.is_authenticated:
     st.stop()
 
 # --- FUNÇÕES DE NAVEGAÇÃO / LOGOUT (Exibidas após o Login) ---
-st.title("Painel de Gestão - SetDoc AI")
+st.title("Painel de Gestão - Tri7 AI")
 
 def logout():
     for key in st.session_state.keys():
@@ -45,5 +45,6 @@ st.sidebar.button("Sair (Logout)", on_click=logout, use_container_width=True)
 
 st.sidebar.header("Módulos")
 st.markdown("Selecione um módulo na barra lateral para começar.")
+
 
 
