@@ -11,7 +11,7 @@ if not st.session_state.get('is_authenticated'):
 API_KEY = st.session_state.api_key
 
 st.header("Gerenciar Permissões por Conta")
-st.info("O bug de unificação de checkboxes foi corrigido. O sistema agora usa uma chave única para cada permissão (Conta + Prompt ID).")
+st.info("Após selecionar os prompts que o cartório vai usar, sempre salve as permissões.")
 
 accounts = get_all_accounts(API_KEY)
 prompts = get_all_prompts(API_KEY)
@@ -66,3 +66,4 @@ if accounts and prompts:
             if st.form_submit_button("Salvar Permissões", use_container_width=True):
                 if sync_account_permissions(selected_account_id_perm, new_permissions, API_KEY):
                     st.success("Permissões atualizadas com sucesso!"); st.rerun()
+
