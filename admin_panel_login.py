@@ -23,6 +23,7 @@ def handle_api_error(e: requests.exceptions.RequestException, action: str):
 # Funções de Contas e Usuários
 @st.cache_data(ttl=30)
 def get_all_accounts(headers: Dict) -> Optional[List[Dict]]:
+    # Retorna TODOS para que o painel possa reativar inativos
     try:
         response = requests.get(f"{API_BASE_URL}/admin/accounts/", headers=headers); response.raise_for_status()
         return response.json()
@@ -40,6 +41,7 @@ def create_new_account(name: str, cod_tri7: Optional[int], cidade: Optional[str]
 
 @st.cache_data(ttl=30)
 def get_users_for_account(account_id: int, headers: Dict) -> Optional[List[Dict]]:
+    # Retorna TODOS os usuários para que o painel possa reativar inativos
     try:
         response = requests.get(f"{API_BASE_URL}/admin/accounts/{account_id}/users/", headers=headers); response.raise_for_status()
         return response.json()
@@ -70,15 +72,11 @@ def regenerate_api_key(user_id: int, headers: Dict) -> Optional[str]:
         return response.json().get("api_key")
     except requests.exceptions.RequestException as e: handle_api_error(e, "regenerar chave de API"); return None
 
-# Funções de Prompts e Permissões (CORRIGIDAS)
+# Funções de Prompts e Permissões
 @st.cache_data(ttl=60)
 def get_all_prompts(headers: Dict):
     try: response = requests.get(f"{API_BASE_URL}/admin/prompts/", headers=headers); response.raise_for_status(); return response.json()
     except requests.exceptions.RequestException as e: handle_api_error(e, "buscar prompts"); return None
-
-def create_new_prompt(name: str, text: str, headers: Dict):
-    try: response = requests.post(f"{API_BASE_URL}/admin/prompts/", headers=headers, json={"name": name, "prompt_text": text}); response.raise_for_status(); return response.json()
-    except requests.exceptions.RequestException as e: handle_api_error(e, "criar prompt"); return None
 
 def update_prompt_details(prompt_id: int, name: str, text: str, headers: Dict):
     try: response = requests.put(f"{API_BASE_URL}/admin/prompts/{prompt_id}", headers=headers, json={"name": name, "prompt_text": text}); response.raise_for_status(); return True
@@ -99,7 +97,7 @@ def sync_account_permissions(account_id: int, prompt_ids: List[int], headers: Di
     try:
         response = requests.put(f"{API_BASE_URL}/admin/accounts/{account_id}/permissions", headers=headers, json={"prompt_ids": prompt_ids})
         response.raise_for_status()
-        get_account_permissions.clear() # Limpa o cache após salvar para forçar a próxima leitura
+        get_account_permissions.clear()
         return True
     except requests.exceptions.RequestException as e: handle_api_error(e, "salvar permissões"); return False
 
@@ -112,12 +110,22 @@ def get_master_billing_report(start_date: str, end_date: str, account_id: Option
         return response.json()
     except requests.exceptions.RequestException as e: handle_api_error(e, "gerar relatório"); return None
 
+def get_detailed_billing_jobs(start_date: str, end_date: str, account_id: Optional[int], headers: Dict):
+    params = {"start_date": start_date, "end_date": end_date}
+    if account_id is not None: params["account_id"] = account_id
+    try:
+        # Chama o novo endpoint detalhado
+        response = requests.get(f"{API_BASE_URL}/billing/detailed-report/", headers=headers, params=params); response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e: handle_api_error(e, "buscar detalhe do relatório"); return None
+
 # --- INICIALIZAÇÃO DA SESSÃO ---
 st.session_state.setdefault('is_authenticated', False)
 st.session_state.setdefault('api_key', "")
 st.session_state.setdefault('new_api_key_info', None)
 st.session_state.setdefault('confirm_action', None)
-st.session_state.setdefault('last_perm_account_id', None)
+st.session_state.setdefault('last_perm_account_id', None) # Para o bug do checkbox
+st.session_state.setdefault('billing_report_data', None) # Para armazenar o relatório
 
 # --- TELA DE LOGIN ---
 if not st.session_state.is_authenticated:
@@ -158,10 +166,15 @@ if page == "Gerenciar Contas e Usuários":
 
     accounts = get_all_accounts(headers)
     if accounts:
-        st.header("Visão Geral das Contas"); st.dataframe(pd.DataFrame(accounts)[['name', 'is_active', 'id', 'created_at']], use_container_width=True, hide_index=True)
+        # FILTRO DE VISIBILIDADE: Apenas contas ativas para a tabela principal
+        df_accounts = pd.DataFrame(accounts)
+        df_accounts_active = df_accounts[df_accounts['is_active'] == True]
+        st.header("Visão Geral das Contas Ativas")
+        st.dataframe(df_accounts_active[['name', 'is_active', 'cidade', 'uf', 'id', 'created_at']], use_container_width=True, hide_index=True)
 
         st.markdown("---")
-        st.header("Gerenciamento Detalhado")
+        st.header("Gerenciamento Detalhado (Ativação/Desativação)")
+        # USAMOS A LISTA COMPLETA AQUI para que o admin possa REATIVAR uma conta
         account_options = {acc['id']: acc['name'] for acc in accounts}
         selected_account_id = st.selectbox("Selecione uma conta para gerenciar:", options=sorted(account_options.keys(), key=lambda x: account_options[x]), format_func=lambda x: f"{account_options[x]} (ID: {x})")
         
@@ -189,9 +202,14 @@ if page == "Gerenciar Contas e Usuários":
             st.subheader(f"Usuários da Conta: '{selected_account['name']}'")
             users = get_users_for_account(selected_account_id, headers)
             if users:
-                st.dataframe(pd.DataFrame(users)[['full_name', 'email', 'is_active', 'id']], use_container_width=True, hide_index=True)
-                user_options = {user['id']: user['full_name'] for user in users}
-                selected_user_id = st.selectbox("Selecione um usuário:", options=sorted(user_options.keys(), key=lambda x: user_options[x]), format_func=lambda x: f"{user_options[x]} (ID: {x})")
+                # FILTRO DE VISIBILIDADE: Apenas usuários ativos para a tabela
+                df_users = pd.DataFrame(users)
+                df_users_active = df_users[df_users['is_active'] == True]
+                st.dataframe(df_users_active[['full_name', 'email', 'is_active', 'id']], use_container_width=True, hide_index=True)
+
+                # USAMOS A LISTA COMPLETA AQUI para que o admin possa REATIVAR um usuário
+                user_options_full = {user['id']: user['full_name'] for user in users}
+                selected_user_id = st.selectbox("Selecione um usuário para gerenciar:", options=sorted(user_options_full.keys(), key=lambda x: user_options_full[x]), format_func=lambda x: f"{user_options_full[x]} (ID: {x})")
                 
                 selected_user = next((user for user in users if user['id'] == selected_user_id), None)
                 if selected_user:
@@ -247,10 +265,10 @@ if page == "Gerenciar Contas e Usuários":
 
             if st.form_submit_button("Criar Conta"):
                 if new_account_name:
-                    # Limpa campos opcionais se estiverem vazios
                     cidade_clean = cidade if cidade else None
                     uf_clean = uf.upper() if uf else None
-                    if create_new_account(new_account_name, cod_tri7, cidade_clean, uf_clean, headers): 
+                    cod_tri7_clean = int(cod_tri7) if cod_tri7 else None
+                    if create_new_account(new_account_name, cod_tri7_clean, cidade_clean, uf_clean, headers): 
                         st.success(f"Conta '{new_account_name}' criada!"); st.cache_data.clear(); st.rerun()
                 else: st.warning("O nome da conta não pode ser vazio.")
 
@@ -259,10 +277,12 @@ elif page == "Gerenciar Prompts":
     st.header("Gerenciar Prompts")
     prompts = get_all_prompts(headers)
     if prompts:
-        st.dataframe(pd.DataFrame(prompts)[['id', 'name']], use_container_width=True, hide_index=True)
+        # Ordena por ID crescente
+        df_prompts = pd.DataFrame(prompts).sort_values(by='id', ascending=True)
+        st.dataframe(df_prompts[['id', 'name']], use_container_width=True, hide_index=True)
         
         prompt_options = {p['id']: p['name'] for p in prompts}
-        selected_prompt_id = st.selectbox("Selecione um prompt para editar ou deletar:", options=sorted(prompt_options.keys(), key=lambda x: prompt_options[x]), format_func=lambda x: f"{prompt_options[x]} (ID: {x})")
+        selected_prompt_id = st.selectbox("Selecione um prompt para editar ou deletar:", options=sorted(prompt_options.keys(), key=lambda x: x), format_func=lambda x: f"{prompt_options[x]} (ID: {x})")
         
         selected_prompt = next((p for p in prompts if p['id'] == selected_prompt_id), None)
         
@@ -307,9 +327,9 @@ elif page == "Gerenciar Permissões":
     if accounts and prompts:
         account_options = {acc['id']: acc['name'] for acc in accounts}
         
-        # Lógica para forçar a limpeza do cache de permissões ao mudar a conta
         selected_account_id_perm = st.selectbox("Selecione a conta para gerenciar:", options=sorted(account_options.keys(), key=lambda x: account_options[x]), format_func=lambda x: account_options[x], key="perm_account_select")
         
+        # Lógica para forçar a limpeza do cache de permissões ao mudar a conta (Bugfix)
         if selected_account_id_perm != st.session_state.last_perm_account_id:
             get_account_permissions.clear()
             st.session_state.last_perm_account_id = selected_account_id_perm
@@ -320,18 +340,113 @@ elif page == "Gerenciar Permissões":
             
             num_columns = 4
             cols = st.columns(num_columns)
-            all_prompt_ids = sorted(prompts, key=lambda p: p['name'])
+            # Ordena os prompts por ID para manter a ordem consistente
+            all_prompt_ids = sorted(prompts, key=lambda p: p['id'])
             
             new_permissions = []
             
             st.write("Marque os prompts que a conta deve ter acesso:")
-            for i, prompt in enumerate(all_prompt_ids):
-                # O uso de key=f"perm_{selected_account_id_perm}_{prompt['id']}" garante que a chave é única por CONTA+PROMPT.
-                is_checked = cols[i % num_columns].checkbox(f"{prompt['name']} (ID: {prompt['id']})", value=(prompt['id'] in current_permissions), key=f"perm_{selected_account_id_perm}_{prompt['id']}")
-                if is_checked: new_permissions.append(prompt['id'])
-            
-            st.markdown("---")
-            if st.button("Salvar Permissões", use_container_width=True):
-                if sync_account_permissions(selected_account_id_perm, new_permissions, headers):
-                    st.success("Permissões atualizadas com sucesso!"); st.rerun()
+            with st.form("perm_form"):
+                for i, prompt in enumerate(all_prompt_ids):
+                    # CHAVE ÚNICA E SÓLIDA: key=f"perm_{account_id}_{prompt_id}"
+                    is_checked = cols[i % num_columns].checkbox(f"{prompt['name']} (ID: {prompt['id']})", value=(prompt['id'] in current_permissions), key=f"perm_{selected_account_id_perm}_{prompt['id']}")
+                    if is_checked: new_permissions.append(prompt['id'])
+                
+                st.markdown("---")
+                if st.form_submit_button("Salvar Permissões", use_container_width=True):
+                    if sync_account_permissions(selected_account_id_perm, new_permissions, headers):
+                        st.success("Permissões atualizadas com sucesso!"); st.rerun()
 
+# --- Dashboard de Faturamento ---
+elif page == "Dashboard de Faturamento":
+    st.header("Dashboard de Faturamento")
+    accounts = get_all_accounts(headers)
+    if accounts:
+        with st.form("billing_form"):
+            account_options_billing = {"Todas as Contas (Resumo)": None}
+            account_options_billing.update({acc['name']: acc['id'] for acc in accounts})
+            selected_account_name = st.selectbox("Selecione a Conta:", options=account_options_billing.keys())
+            
+            today = date.today()
+            default_start = today - timedelta(days=30)
+            col1, col2 = st.columns(2)
+            start_date = col1.date_input("Data de Início", value=default_start)
+            end_date = col2.date_input("Data de Fim", value=today)
+            
+            submitted = st.form_submit_button("Gerar Relatório", use_container_width=True)
+        
+        if submitted:
+            selected_account_id_billing = account_options_billing[selected_account_name]
+            report_id = selected_account_id_billing 
+            
+            if start_date and end_date:
+                with st.spinner("Gerando relatório..."):
+                    # 1. Chamar o endpoint DETALHADO para a exportação
+                    detailed_jobs = get_detailed_billing_jobs(str(start_date), str(end_date), report_id, headers)
+                    # 2. Chamar o endpoint de RESUMO para as métricas da tela
+                    summary_report = get_master_billing_report(str(start_date), str(end_date), report_id, headers)
+
+                if detailed_jobs and summary_report and summary_report.get('by_model'):
+                    st.session_state['billing_report_data'] = {
+                        'summary': summary_report,
+                        'jobs_breakdown': detailed_jobs,
+                        'period': summary_report.get('period', {})
+                    }
+                else:
+                    st.info("Nenhum dado de faturamento encontrado para o período e conta selecionados.")
+                    st.session_state.billing_report_data = None
+
+        if st.session_state.billing_report_data:
+            report_data = st.session_state.billing_report_data
+            summary = report_data['summary'].get('summary', {})
+            by_model = report_data['summary'].get('by_model', [])
+            
+            st.subheader(f"Resumo do Período para: {selected_account_name}")
+            col_resumo1, col_resumo2 = st.columns(2)
+            col_resumo1.metric(label="Total de Jobs Processados", value=f"{summary.get('total_jobs', 0):,}")
+            col_resumo2.metric(label="Total de Tokens Consumidos", value=f"{summary.get('total_tokens', 0):,}")
+
+            if by_model:
+                st.subheader("Consumo Detalhado por Modelo")
+                df_report = pd.DataFrame(by_model)
+                st.dataframe(df_report, use_container_width=True, hide_index=True)
+
+            st.markdown("---")
+            st.subheader("Exportar Relatório Detalhado")
+            
+            # --- LÓGICA DE EXPORTAÇÃO DETALHADA COM FORMATO EXATO DO CLIENTE ---
+            df_jobs = pd.DataFrame(report_data['jobs_breakdown'])
+
+            # 1. Renomear e Mapear Colunas
+            df_jobs = df_jobs.rename(columns={
+                'created_at': 'Data', 
+                'account_name': 'Cartório', 
+                'user_name': 'Usuário', 
+                'job_id': 'ID do Job', 
+                'prompt_name': 'Prompt', 
+                'model_display_name': 'Modelo', 
+                'cost_brl': 'Custo (R$)',
+                'total_tokens': 'Tokens Brutos'
+            })
+
+            # 2. Formatar e Reordenar Colunas
+            df_jobs['Data'] = pd.to_datetime(df_jobs['Data']).dt.strftime('%d/%m/%Y %H:%M:%S')
+            df_jobs['Custo (R$)'] = df_jobs['Custo (R$)'].astype(float).round(8) # Usando float e round para precisão
+
+            # Colunas finais na ordem exata solicitada
+            final_columns = ['Data', 'Cartório', 'Usuário', 'ID do Job', 'Prompt', 'Modelo', 'Custo (R$)', 'Tokens Brutos']
+            df_export = df_jobs.reindex(columns=final_columns)
+            
+            # 3. Gerar o arquivo Excel em memória
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                df_export.to_excel(writer, index=False, sheet_name='RelatorioFaturamento')
+                worksheet = writer.sheets['RelatorioFaturamento']
+                for i, col in enumerate(df_export.columns):
+                    column_len = max(df_export[col].astype(str).str.len().max(), len(col)) + 2
+                    worksheet.set_column(i, i, column_len)
+            
+            period_str = report_data['period']
+            file_name_str = f"relatorio_detalhado_{period_str['start']}_a_{period_str['end']}.xlsx"
+
+            st.download_button(label="📥 Baixar Relatório Detalhado (.xlsx)", data=output.getvalue(), file_name=file_name_str, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
