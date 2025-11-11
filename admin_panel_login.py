@@ -293,32 +293,34 @@ elif page == "Gerenciar Prompts":
 # --- Gerenciar Permissões ---
 elif page == "Gerenciar Permissões":
     st.header("Gerenciar Permissões por Conta")
+    
+    # Adicionamos uma verificação simples no início
+    if 'permissions_account_id' not in st.session_state:
+        st.session_state.permissions_account_id = None
+        
     accounts = get_all_accounts(headers)
     prompts = get_all_prompts(headers)
-
-    # 1. FUNÇÃO DE CALLBACK PARA LIMPAR O CACHE QUANDO A CONTA MUDA
-    def on_account_change():
-        # Limpa o cache de permissões para forçar o carregamento das novas permissões
-        get_account_permissions.clear()
-
+    
     if accounts and prompts:
         account_options = {acc['id']: acc['name'] for acc in accounts}
-        prompt_options = {p['id']: p['name'] for p in prompts}
         
-        # 2. SELECTBOX COM CALLBACK
+        # O selectbox agora usa uma chave simples e não usa on_change (simplificando o fluxo)
         selected_account_id_perm = st.selectbox(
             "Selecione a conta para gerenciar:",
             options=sorted(account_options.keys(), key=lambda x: account_options[x]),
             format_func=lambda x: account_options[x],
-            key="perm_account_select",
-            on_change=on_account_change # <--- NOVO: Dispara a limpeza do cache ao mudar
+            key="perm_account_select"
         )
         
         if selected_account_id_perm:
+            # Lógica para limpar o cache se o usuário mudou a conta (garantindo que o cache antigo não seja usado)
+            if selected_account_id_perm != st.session_state.permissions_account_id:
+                get_account_permissions.clear()
+                st.session_state.permissions_account_id = selected_account_id_perm
+            
             st.subheader(f"Configurando Prompts para: {account_options[selected_account_id_perm]}")
             
-            # 3. CARREGAMENTO SEM CACHE RUIM
-            # current_permissions é a lista de IDs de prompts permitidos
+            # Carrega as permissões usando a versão mais atualizada da função
             current_permissions = get_account_permissions(selected_account_id_perm, headers)
             
             num_columns = 4
@@ -329,13 +331,12 @@ elif page == "Gerenciar Permissões":
             
             st.write("Marque os prompts que a conta deve ter acesso:")
             for i, prompt in enumerate(all_prompt_ids):
-                # O uso de key=f"perm_{selected_account_id_perm}_{prompt['id']}" garante que a chave
-                # é única não apenas por ID do Prompt, mas por CONTA+PROMPT.
-                # Isso impede a unificação dos estados entre contas.
+                # A chave única é fundamental e agora usa o ID da conta e o ID do prompt
+                # Ex: "perm_10_5" para conta 10, prompt 5
                 is_checked = cols[i % num_columns].checkbox(
                     f"{prompt['name']} (ID: {prompt['id']})",
                     value=(prompt['id'] in current_permissions),
-                    key=f"perm_{selected_account_id_perm}_{prompt['id']}" # <--- CHAVE ÚNICA CORRIGIDA
+                    key=f"perm_{selected_account_id_perm}_{prompt['id']}" # <-- CHAVE ÚNICA E SÓLIDA
                 )
                 if is_checked:
                     new_permissions.append(prompt['id'])
@@ -344,7 +345,7 @@ elif page == "Gerenciar Permissões":
             if st.button("Salvar Permissões", use_container_width=True):
                 if sync_account_permissions(selected_account_id_perm, new_permissions, headers):
                     st.success("Permissões atualizadas com sucesso!")
-                    get_account_permissions.clear() # Limpa o cache após salvar para forçar a próxima leitura
+                    get_account_permissions.clear() # Limpa o cache após salvar
                     st.rerun()
 
 # --- Dashboard de Faturamento ---
@@ -424,4 +425,5 @@ elif page == "Dashboard de Faturamento":
             file_name_str = f"relatorio_resumo_{period_str['start']}_a_{period_str['end']}.xlsx"
 
             st.download_button(label="📥 Baixar Relatório Resumido (.xlsx)", data=output.getvalue(), file_name=file_name_str, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+
 
