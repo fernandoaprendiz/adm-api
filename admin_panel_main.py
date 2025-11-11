@@ -1,40 +1,19 @@
 # admin_panel_main.py (PONTO DE ENTRADA E AUTENTICAÇÃO)
 
 import streamlit as st
-import requests
-from typing import Dict
+import sys
+import os
 
-# --- CONFIGURAÇÃO ---
-API_BASE_URL = "https://setdoc-api-gateway-308638875599.southamerica-east1.run.app"
+# Adiciona o caminho da raiz do projeto para que as páginas consigam importar o módulo de funções
+sys.path.insert(0, os.path.dirname(__file__))
+
+from shared_funcs import check_admin_auth
 
 st.set_page_config(layout="wide", page_title="Painel de Gestão SetDoc AI")
-
-# --- FUNÇÕES DE API SIMPLIFICADAS PARA AUTENTICAÇÃO ---
-def handle_api_error(e: requests.exceptions.RequestException, action: str):
-    """Função centralizada para lidar com erros de API."""
-    st.error(f"Falha ao {action}.")
-    if e.response is not None:
-        try: st.error(f"Detalhe: {e.response.json().get('detail', e.response.text)}")
-        except: st.error(f"Detalhe: {e.response.text}")
-
-def check_admin_auth(api_key: str) -> bool:
-    """Tenta autenticar no endpoint de admin."""
-    headers = {"x-api-key": api_key}
-    try:
-        # Tenta acessar um endpoint de admin protegido (ex: listar contas)
-        response = requests.get(f"{API_BASE_URL}/admin/accounts/", headers=headers, timeout=10)
-        response.raise_for_status()
-        return True
-    except requests.exceptions.RequestException as e:
-        if e.response is not None and e.response.status_code == 403:
-            return False # Sem permissão
-        handle_api_error(e, "conectar e validar chave")
-        return False
 
 # --- INICIALIZAÇÃO DA SESSÃO ---
 st.session_state.setdefault('is_authenticated', False)
 st.session_state.setdefault('api_key', "")
-# Inicializa o estado para as novas funcionalidades (mantenha-o aqui)
 st.session_state.setdefault('new_api_key_info', None)
 st.session_state.setdefault('confirm_action', None)
 st.session_state.setdefault('last_perm_account_id', None) 
