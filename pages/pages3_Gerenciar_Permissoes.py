@@ -2,30 +2,25 @@
 
 import streamlit as st
 import pandas as pd
-import sys
-import os
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from admin_panel_main import headers, get_all_accounts, get_all_prompts
-from admin_panel_main import get_account_permissions, sync_account_permissions
+from shared_funcs import get_all_accounts, get_all_prompts
+from shared_funcs import get_account_permissions, sync_account_permissions
 
 if not st.session_state.get('is_authenticated'):
     st.stop()
 
+API_KEY = st.session_state.api_key
+
 st.header("Gerenciar Permissões por Conta")
 st.info("O bug de unificação de checkboxes foi corrigido. O sistema agora usa uma chave única para cada permissão (Conta + Prompt ID).")
 
-accounts = get_all_accounts(headers)
-prompts = get_all_prompts(headers)
+accounts = get_all_accounts(API_KEY)
+prompts = get_all_prompts(API_KEY)
 
 if accounts and prompts:
     account_options = {acc['id']: acc['name'] for acc in accounts}
     
     # 1. Seleção de Conta
-    selected_account_id_perm = st.selectbox("Selecione a conta para gerenciar:", 
-                                            options=sorted(account_options.keys(), key=lambda x: account_options[x]), 
-                                            format_func=lambda x: account_options[x], 
-                                            key="perm_account_select")
+    selected_account_id_perm = st.selectbox("Selecione a conta para gerenciar:", options=sorted(account_options.keys(), key=lambda x: account_options[x]), format_func=lambda x: account_options[x], key="perm_account_select")
     
     # 2. Lógica para forçar a limpeza do cache de permissões ao mudar a conta (Bugfix)
     if selected_account_id_perm != st.session_state.get('last_perm_account_id'):
@@ -34,7 +29,7 @@ if accounts and prompts:
     
     if selected_account_id_perm:
         st.subheader(f"Configurando Prompts para: {account_options[selected_account_id_perm]}")
-        current_permissions = get_account_permissions(selected_account_id_perm, headers)
+        current_permissions = get_account_permissions(selected_account_id_perm, API_KEY)
         
         # 3. Layout de Checkboxes em Colunas (Melhor UX)
         num_columns = 4
@@ -54,5 +49,5 @@ if accounts and prompts:
             
             st.markdown("---")
             if st.form_submit_button("Salvar Permissões", use_container_width=True):
-                if sync_account_permissions(selected_account_id_perm, new_permissions, headers):
+                if sync_account_permissions(selected_account_id_perm, new_permissions, API_KEY):
                     st.success("Permissões atualizadas com sucesso!"); st.rerun()
