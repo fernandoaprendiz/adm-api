@@ -2,19 +2,15 @@
 
 import streamlit as st
 import pandas as pd
-import sys
-import os
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from admin_panel_main import headers, get_all_prompts
-# Importa as funções de CRUD de prompts que foram definidas no arquivo principal
-from admin_panel_main import create_new_prompt, update_prompt_details, delete_prompt
+from shared_funcs import get_all_prompts, create_new_prompt, update_prompt_details, delete_prompt
 
 if not st.session_state.get('is_authenticated'):
     st.stop()
 
+API_KEY = st.session_state.api_key
+
 st.header("Gerenciar Prompts")
-prompts = get_all_prompts(headers)
+prompts = get_all_prompts(API_KEY)
 if prompts:
     # Ordena por ID crescente, como solicitado
     df_prompts = pd.DataFrame(prompts).sort_values(by='id', ascending=True)
@@ -39,7 +35,7 @@ if prompts:
             
             col1, col2 = st.columns(2)
             if col1.form_submit_button("Salvar Alterações", use_container_width=True):
-                if update_prompt_details(selected_prompt_id, edited_name, edited_text, headers):
+                if update_prompt_details(selected_prompt_id, edited_name, edited_text, API_KEY):
                     st.success("Prompt atualizado!"); get_all_prompts.clear(); st.rerun()
             if col2.form_submit_button("Deletar Prompt", use_container_width=True):
                 st.session_state.confirm_action = ("delete_prompt", selected_prompt_id, selected_prompt['name'])
@@ -49,7 +45,7 @@ if prompts:
             _, prompt_id, name = st.session_state.confirm_action
             st.warning(f"**Atenção:** Você tem certeza que deseja DELETAR o prompt '{name}'? Esta ação não pode ser desfeita.")
             if st.button("Sim, DELETAR", key="confirm_delete"):
-                if delete_prompt(prompt_id, headers): 
+                if delete_prompt(prompt_id, API_KEY): 
                     st.success("Prompt deletado."); get_all_prompts.clear(); st.session_state.confirm_action = None; st.rerun()
             if st.button("Cancelar", key="cancel_delete"): st.session_state.confirm_action = None; st.rerun()
 
@@ -59,6 +55,6 @@ with st.expander("➕ Criar Novo Prompt"):
         new_prompt_text = st.text_area("Texto do Novo Prompt", height=200)
         if st.form_submit_button("Criar Prompt"):
             if new_prompt_name and new_prompt_text:
-                if create_new_prompt(new_prompt_name, new_prompt_text, headers): 
+                if create_new_prompt(new_prompt_name, new_prompt_text, API_KEY): 
                     st.success("Novo prompt criado!"); get_all_prompts.clear(); st.rerun()
             else: st.warning("Preencha o nome e o texto do prompt.")
