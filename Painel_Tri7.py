@@ -21,7 +21,7 @@ st.session_state.setdefault('billing_report_data', None)
 
 # --- TELA DE LOGIN / PROTEÇÃO ---
 if not st.session_state.is_authenticated:
-    st.title("Acesso ao Painel de Gestão - SetDoc AI")
+    st.title("Acesso ao Painel de Gestão - Tri7 AI")
     api_key_input = st.text_input("Chave de API de Administrador:", type="password", key="login_api_key")
     if st.button("Entrar", use_container_width=True):
         if check_admin_auth(api_key_input):
@@ -45,4 +45,5 @@ st.sidebar.button("Sair (Logout)", on_click=logout, use_container_width=True)
 
 st.sidebar.header("Módulos")
 st.markdown("Selecione um módulo na barra lateral para começar.")
+
 
