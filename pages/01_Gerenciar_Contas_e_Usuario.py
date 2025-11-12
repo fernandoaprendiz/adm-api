@@ -1,4 +1,4 @@
-# pages/1_Gerenciar_Contas_e_Usuários.py
+# pages/1_Gerenciar_Contas_e_Usuários.py (CORRIGIDO)
 
 import streamlit as st
 import pandas as pd
@@ -10,7 +10,6 @@ from shared_funcs import (
     set_account_status, set_user_status, regenerate_api_key, create_new_user
 )
 
-# Ponto de entrada da página
 if not st.session_state.get('is_authenticated'):
     st.stop()
 
@@ -30,7 +29,9 @@ if accounts:
     df_accounts = pd.DataFrame(accounts)
     df_accounts_active = df_accounts[df_accounts['is_active'] == True]
     st.subheader("Contas Ativas (Visão Geral)")
-    st.dataframe(df_accounts_active[['name', 'is_active', 'cidade', 'uf', 'id', 'created_at']], use_container_width=True, hide_index=True)
+    
+    display_cols = ['name', 'is_active', 'cidade', 'uf', 'id', 'created_at']
+    st.dataframe(df_accounts_active[display_cols], use_container_width=True, hide_index=True)
 
     st.markdown("---")
     st.header("Gerenciamento Detalhado (Ativação/Desativação)")
@@ -61,6 +62,9 @@ if accounts:
         st.markdown("---")
         st.subheader(f"Usuários da Conta: '{selected_account['name']}'")
         users = get_users_for_account(selected_account_id, API_KEY)
+        
+        # --- CORREÇÃO DO BUG: O botão de criar usuário foi movido para fora do 'if users:' ---
+        
         if users:
             # FILTRO DE VISIBILIDADE: Apenas usuários ativos para a tabela
             df_users = pd.DataFrame(users)
@@ -103,15 +107,17 @@ if accounts:
                                 st.cache_data.clear(); st.session_state.confirm_action = None; st.rerun()
                             else: st.session_state.confirm_action = None
                         if st.button("Cancelar", key="cancel_regen"): st.session_state.confirm_action = None; st.rerun()
+        else:
+            st.info("Nenhum usuário nesta conta. Crie um novo abaixo.")
 
-            with st.expander(f"➕ Criar Novo Usuário para '{selected_account['name']}'"):
-                with st.form("new_user_form", clear_on_submit=True):
-                    full_name, email, password = st.text_input("Nome Completo"), st.text_input("Email"), st.text_input("Senha", type="password")
-                    if st.form_submit_button("Criar Usuário"):
-                        if all([full_name, email, password]):
-                            response = create_new_user(full_name, email, password, selected_account_id, API_KEY)
-                            if response: st.session_state.new_api_key_info = (response['full_name'], response.get('api_key')); st.cache_data.clear(); st.rerun()
-                        else: st.warning("Preencha todos os campos.")
+        with st.expander(f"➕ Criar Novo Usuário para '{selected_account['name']}'"):
+            with st.form("new_user_form", clear_on_submit=True):
+                full_name, email, password = st.text_input("Nome Completo"), st.text_input("Email"), st.text_input("Senha", type="password")
+                if st.form_submit_button("Criar Usuário"):
+                    if all([full_name, email, password]):
+                        response = create_new_user(full_name, email, password, selected_account_id, API_KEY)
+                        if response: st.session_state.new_api_key_info = (response['full_name'], response.get('api_key')); st.cache_data.clear(); st.rerun()
+                    else: st.warning("Preencha todos os campos.")
 
     with st.expander("➕ Criar Nova Conta"):
         with st.form("new_account_form", clear_on_submit=True):
